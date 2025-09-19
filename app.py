@@ -31,7 +31,7 @@ st.set_page_config(
     page_icon="🕷️"
 )
 
-# Custom CSS for professional look
+# Custom CSS for professional look and diff viewer
 st.markdown("""
 <style>
     .main-header {
@@ -59,6 +59,164 @@ st.markdown("""
         border-radius: 8px;
         margin-bottom: 1rem;
     }
+    
+    /* Diff Viewer Styles */
+    .diff-container {
+        display: flex;
+        height: 600px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        overflow: hidden;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        background: #f8f9fa;
+    }
+    
+    .diff-panel {
+        flex: 1;
+        overflow: auto;
+        padding: 10px;
+        line-height: 1.4;
+    }
+    
+    .diff-panel.original {
+        background: #fff;
+        border-right: 2px solid #667eea;
+    }
+    
+    .diff-panel.rendered {
+        background: #f0f8ff;
+    }
+    
+    .diff-header {
+        position: sticky;
+        top: 0;
+        background: #667eea;
+        color: white;
+        padding: 8px 12px;
+        font-weight: bold;
+        margin: -10px -10px 10px -10px;
+        border-bottom: 1px solid #5a67d8;
+    }
+    
+    .line-number {
+        display: inline-block;
+        width: 40px;
+        color: #666;
+        text-align: right;
+        margin-right: 10px;
+        user-select: none;
+        border-right: 1px solid #ddd;
+        padding-right: 8px;
+    }
+    
+    .line-content {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+    
+    .line-added {
+        background: #d4edda;
+        border-left: 3px solid #28a745;
+        padding-left: 5px;
+        margin-left: -8px;
+    }
+    
+    .line-removed {
+        background: #f8d7da;
+        border-left: 3px solid #dc3545;
+        padding-left: 5px;
+        margin-left: -8px;
+    }
+    
+    .line-modified {
+        background: #fff3cd;
+        border-left: 3px solid #ffc107;
+        padding-left: 5px;
+        margin-left: -8px;
+    }
+    
+    .line-unchanged {
+        opacity: 0.7;
+    }
+    
+    .highlight-js-addition {
+        background: #e8f5e8;
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-weight: bold;
+    }
+    
+    .highlight-meta-addition {
+        background: #fff3cd;
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-weight: bold;
+    }
+    
+    .diff-stats {
+        display: flex;
+        gap: 20px;
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 5px;
+        margin-bottom: 15px;
+        font-size: 14px;
+    }
+    
+    .diff-stat {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+    
+    .diff-stat.added { color: #28a745; }
+    .diff-stat.removed { color: #dc3545; }
+    .diff-stat.modified { color: #ffc107; }
+    
+    .search-highlight {
+        background: #ffff00;
+        padding: 1px 2px;
+        border-radius: 2px;
+    }
+    
+    .filter-controls {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+        flex-wrap: wrap;
+    }
+    
+    .filter-button {
+        padding: 5px 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: white;
+        cursor: pointer;
+        font-size: 12px;
+    }
+    
+    .filter-button.active {
+        background: #667eea;
+        color: white;
+        border-color: #667eea;
+    }
+    
+    .js-injection-highlight {
+        background: linear-gradient(90deg, #d4edda 0%, #c3e6cb 100%);
+        border: 1px solid #28a745;
+        border-radius: 3px;
+        padding: 2px;
+        margin: 2px 0;
+    }
+    
+    .meta-change-highlight {
+        background: linear-gradient(90deg, #fff3cd 0%, #ffeaa7 100%);
+        border: 1px solid #ffc107;
+        border-radius: 3px;
+        padding: 2px;
+        margin: 2px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,8 +228,8 @@ if 'crawl_results' not in st.session_state:
     st.session_state.crawl_results = []
 if 'crawl_running' not in st.session_state:
     st.session_state.crawl_running = False
-if 'driver_manager' not in st.session_state:
-    st.session_state.driver_manager = None
+if 'driver_pool' not in st.session_state:
+    st.session_state.driver_manager = None # Changed from driver_pool
 if 'selected_url_for_diff' not in st.session_state:
     st.session_state.selected_url_for_diff = None
 
@@ -95,8 +253,13 @@ class WebDriverManager:
             options.add_argument("--disable-gpu")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-renderer-backgrounding")
+            options.add_argument("--disable-backgrounding-occluded-windows")
             options.add_argument("--window-size=1920,1080")
-            options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
+            # Use a consistent, modern User-Agent for both requests and Selenium
+            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
+            options.add_argument(f"user-agent={user_agent}")
 
             # Performance settings to disable images and notifications
             prefs = {
@@ -187,297 +350,168 @@ class HTMLDiffAnalyzer:
                 stats['structural_changes'] += 1
         
         return stats
-
-def create_streamlit_diff_viewer(diff_analyzer, search_term="", show_only_changes=False):
-    """Create a working diff viewer using Streamlit components"""
     
-    # Get statistics
+    def get_detailed_changes(self):
+        """Get detailed line-by-line changes with categories"""
+        matcher = difflib.SequenceMatcher(None, self.original_lines, self.rendered_lines)
+        changes = []
+        
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                continue
+                
+            change = {
+                'type': tag,
+                'original_lines': self.original_lines[i1:i2] if tag != 'insert' else [],
+                'rendered_lines': self.rendered_lines[j1:j2] if tag != 'delete' else [],
+                'original_range': (i1, i2),
+                'rendered_range': (j1, j2),
+                'category': self._categorize_change(
+                    self.original_lines[i1:i2] if tag != 'insert' else [],
+                    self.rendered_lines[j1:j2] if tag != 'delete' else []
+                )
+            }
+            changes.append(change)
+        
+        return changes
+    
+    def _categorize_change(self, original_lines, rendered_lines):
+        """Categorize the type of change"""
+        all_lines = original_lines + rendered_lines
+        content = '\n'.join(all_lines).lower()
+        
+        if '<script' in content or 'javascript:' in content:
+            return 'javascript'
+        elif '<meta' in content or 'og:' in content or 'twitter:' in content:
+            return 'metadata'
+        elif '<link' in content and ('css' in content or 'stylesheet' in content):
+            return 'stylesheet'
+        elif any(tag in content for tag in ['<div', '<span', '<p', '<h1', '<h2', '<h3']):
+            return 'content'
+        elif 'data-' in content or 'id=' in content or 'class=' in content:
+            return 'attributes'
+        else:
+            return 'other'
+
+def create_diff_viewer_html(diff_analyzer, search_term="", show_only_changes=False):
+    """Create HTML for the diff viewer"""
+    changes = diff_analyzer.get_detailed_changes()
     stats = diff_analyzer.get_change_statistics()
     
-    # Display statistics in columns
-    st.subheader("Diff Statistics")
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-    
-    with col1:
-        st.metric("Lines Added", stats['lines_added'])
-    with col2:
-        st.metric("Lines Removed", stats['lines_removed'])
-    with col3:
-        st.metric("Lines Modified", stats['lines_modified'])
-    with col4:
-        st.metric("JS Injections", stats['js_injections'])
-    with col5:
-        st.metric("Meta Changes", stats['meta_changes'])
-    with col6:
-        similarity_pct = stats['similarity_ratio'] * 100
-        st.metric("Similarity", f"{similarity_pct:.1f}%")
-    
-    # Create side-by-side comparison using Streamlit columns
-    st.subheader("HTML Comparison")
-    
+    # Create side-by-side view
     original_lines = diff_analyzer.original_lines
     rendered_lines = diff_analyzer.rendered_lines
     
-    # Generate diff using difflib
     matcher = difflib.SequenceMatcher(None, original_lines, rendered_lines)
     
-    # Collect changes for display
-    original_display = []
-    rendered_display = []
+    original_html = []
+    rendered_html = []
     
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == 'equal':
             if not show_only_changes:
-                # Show unchanged lines
                 for i in range(i1, i2):
-                    line = original_lines[i]
+                    line = html.escape(original_lines[i])
                     if search_term and search_term.lower() in line.lower():
-                        line = line.replace(search_term, f"**{search_term}**")
-                    original_display.append(f"   {i+1:4d}: {line}")
+                        line = line.replace(search_term, f'<span class="search-highlight">{search_term}</span>')
+                    original_html.append(f'<div class="line-unchanged"><span class="line-number">{i+1}</span><span class="line-content">{line}</span></div>')
                 
                 for j in range(j1, j2):
-                    line = rendered_lines[j]
+                    line = html.escape(rendered_lines[j])
                     if search_term and search_term.lower() in line.lower():
-                        line = line.replace(search_term, f"**{search_term}**")
-                    rendered_display.append(f"   {j+1:4d}: {line}")
+                        line = line.replace(search_term, f'<span class="search-highlight">{search_term}</span>')
+                    rendered_html.append(f'<div class="line-unchanged"><span class="line-number">{j+1}</span><span class="line-content">{line}</span></div>')
         
         elif tag == 'delete':
-            # Lines removed from original
             for i in range(i1, i2):
-                line = original_lines[i]
+                line = html.escape(original_lines[i])
                 if search_term and search_term.lower() in line.lower():
-                    line = line.replace(search_term, f"**{search_term}**")
-                original_display.append(f"❌ {i+1:4d}: {line}")
+                    line = line.replace(search_term, f'<span class="search-highlight">{search_term}</span>')
+                original_html.append(f'<div class="line-removed"><span class="line-number">{i+1}</span><span class="line-content">- {line}</span></div>')
         
         elif tag == 'insert':
-            # Lines added to rendered
             for j in range(j1, j2):
-                line = rendered_lines[j]
+                line = html.escape(rendered_lines[j])
                 # Highlight JavaScript additions
-                prefix = "✅"
                 if '<script' in line.lower() or 'javascript:' in line.lower():
-                    prefix = "🔥 JS"
+                    line = f'<span class="highlight-js-addition">{line}</span>'
                 elif '<meta' in line.lower():
-                    prefix = "📝 META"
+                    line = f'<span class="highlight-meta-addition">{line}</span>'
                 
                 if search_term and search_term.lower() in line.lower():
-                    line = line.replace(search_term, f"**{search_term}**")
-                rendered_display.append(f"{prefix} {j+1:4d}: {line}")
+                    line = line.replace(search_term, f'<span class="search-highlight">{search_term}</span>')
+                rendered_html.append(f'<div class="line-added"><span class="line-number">{j+1}</span><span class="line-content">+ {line}</span></div>')
         
         elif tag == 'replace':
-            # Lines modified
             for i in range(i1, i2):
-                line = original_lines[i]
+                line = html.escape(original_lines[i])
                 if search_term and search_term.lower() in line.lower():
-                    line = line.replace(search_term, f"**{search_term}**")
-                original_display.append(f"🔄 {i+1:4d}: {line}")
+                    line = line.replace(search_term, f'<span class="search-highlight">{search_term}</span>')
+                original_html.append(f'<div class="line-modified"><span class="line-number">{i+1}</span><span class="line-content">~ {line}</span></div>')
             
             for j in range(j1, j2):
-                line = rendered_lines[j]
-                prefix = "🔄"
+                line = html.escape(rendered_lines[j])
                 if '<script' in line.lower() or 'javascript:' in line.lower():
-                    prefix = "🔥 JS"
+                    line = f'<span class="highlight-js-addition">{line}</span>'
                 elif '<meta' in line.lower():
-                    prefix = "📝 META"
+                    line = f'<span class="highlight-meta-addition">{line}</span>'
                 
                 if search_term and search_term.lower() in line.lower():
-                    line = line.replace(search_term, f"**{search_term}**")
-                rendered_display.append(f"{prefix} {j+1:4d}: {line}")
+                    line = line.replace(search_term, f'<span class="search-highlight">{search_term}</span>')
+                rendered_html.append(f'<div class="line-modified"><span class="line-number">{j+1}</span><span class="line-content">~ {line}</span></div>')
     
-    # Display in two columns
-    col1, col2 = st.columns(2)
+    # Stats HTML
+    stats_html = f"""
+    <div class="diff-stats">
+        <div class="diff-stat">
+            <strong>Total Lines:</strong> {stats['total_lines_original']} → {stats['total_lines_rendered']}
+        </div>
+        <div class="diff-stat added">
+            <strong>Added:</strong> {stats['lines_added']} lines
+        </div>
+        <div class="diff-stat removed">
+            <strong>Removed:</strong> {stats['lines_removed']} lines
+        </div>
+        <div class="diff-stat modified">
+            <strong>Modified:</strong> {stats['lines_modified']} lines
+        </div>
+        <div class="diff-stat">
+            <strong>JS Injections:</strong> {stats['js_injections']}
+        </div>
+        <div class="diff-stat">
+            <strong>Similarity:</strong> {stats['similarity_ratio']:.1%}
+        </div>
+    </div>
+    """
     
-    with col1:
-        st.markdown("### Original HTML")
-        if original_display:
-            # Use text area for better display
-            original_text = "\n".join(original_display)
-            st.text_area(
-                "Original HTML Content",
-                original_text,
-                height=400,
-                key="original_html_display",
-                label_visibility="collapsed"
-            )
-        else:
-            st.info("No original HTML content to display")
+    # Complete HTML
+    complete_html = f"""
+    {stats_html}
+    <div class="diff-container">
+        <div class="diff-panel original">
+            <div class="diff-header">
+                Original HTML ({len(original_lines)} lines)
+            </div>
+            {''.join(original_html)}
+        </div>
+        <div class="diff-panel rendered">
+            <div class="diff-header">
+                Rendered HTML ({len(rendered_lines)} lines)
+            </div>
+            {''.join(rendered_html)}
+        </div>
+    </div>
+    """
     
-    with col2:
-        st.markdown("### Rendered HTML")
-        if rendered_display:
-            rendered_text = "\n".join(rendered_display)
-            st.text_area(
-                "Rendered HTML Content",
-                rendered_text,
-                height=400,
-                key="rendered_html_display",
-                label_visibility="collapsed"
-            )
-        else:
-            st.info("No rendered HTML content to display")
-    
-    # Show unified diff as well
-    with st.expander("📄 Unified Diff View", expanded=False):
-        diff_lines = diff_analyzer.generate_diff()
-        if diff_lines:
-            diff_text = "\n".join(diff_lines)
-            st.code(diff_text, language="diff")
-        else:
-            st.info("No differences found")
-    
-    return stats
+    return complete_html
 
-def display_diff_insights(diff_analyzer):
-    """Display detailed insights about the differences"""
-    
-    original_lines = diff_analyzer.original_lines
-    rendered_lines = diff_analyzer.rendered_lines
-    matcher = difflib.SequenceMatcher(None, original_lines, rendered_lines)
-    
-    # Categorize changes
-    js_changes = []
-    meta_changes = []
-    content_changes = []
-    other_changes = []
-    
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag in ['insert', 'replace']:
-            lines = rendered_lines[j1:j2] if tag == 'insert' else rendered_lines[j1:j2]
-            
-            for line in lines:
-                line_lower = line.lower()
-                if '<script' in line_lower or 'javascript:' in line_lower:
-                    js_changes.append(line.strip())
-                elif '<meta' in line_lower or 'og:' in line_lower or 'twitter:' in line_lower:
-                    meta_changes.append(line.strip())
-                elif any(tag_name in line_lower for tag_name in ['<div', '<span', '<p', '<h1', '<h2', '<h3']):
-                    content_changes.append(line.strip())
-                else:
-                    other_changes.append(line.strip())
-    
-    # Display categorized changes
-    if js_changes:
-        with st.expander(f"🔥 JavaScript Changes ({len(js_changes)})", expanded=True):
-            for i, change in enumerate(js_changes[:10], 1):
-                st.code(change, language="html")
-                if i >= 10 and len(js_changes) > 10:
-                    st.info(f"... and {len(js_changes) - 10} more JavaScript changes")
-                    break
-    
-    if meta_changes:
-        with st.expander(f"📝 Metadata Changes ({len(meta_changes)})", expanded=False):
-            for i, change in enumerate(meta_changes[:10], 1):
-                st.code(change, language="html")
-                if i >= 10 and len(meta_changes) > 10:
-                    st.info(f"... and {len(meta_changes) - 10} more metadata changes")
-                    break
-    
-    if content_changes:
-        with st.expander(f"📄 Content Changes ({len(content_changes)})", expanded=False):
-            for i, change in enumerate(content_changes[:5], 1):
-                st.code(change, language="html")
-                if i >= 5 and len(content_changes) > 5:
-                    st.info(f"... and {len(content_changes) - 5} more content changes")
-                    break
-    
-    if other_changes:
-        with st.expander(f"🔧 Other Changes ({len(other_changes)})", expanded=False):
-            for i, change in enumerate(other_changes[:5], 1):
-                st.code(change, language="html")
-                if i >= 5 and len(other_changes) > 5:
-                    st.info(f"... and {len(other_changes) - 5} more changes")
-                    break
-
-def show_diff_viewer_tab(crawl_results):
-    """Updated diff viewer tab that actually works in Streamlit"""
-    
-    st.subheader("HTML Diff Viewer")
-    st.write("Compare original HTML with JavaScript-rendered HTML to see what changes after page load.")
-    
-    # URL selector
-    urls_with_data = [r['url'] for r in crawl_results if r.get('raw_html') and r.get('rendered_html')]
-    
-    if urls_with_data:
-        selected_url = st.selectbox(
-            "Select URL to analyze:",
-            urls_with_data,
-            key="diff_url_selector"
-        )
-        
-        if selected_url:
-            # Find the result for this URL
-            selected_result = next((r for r in crawl_results if r['url'] == selected_url), None)
-            
-            if selected_result and selected_result.get('raw_html') and selected_result.get('rendered_html'):
-                # Controls
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    search_term = st.text_input("Search in HTML:", placeholder="Enter search term...")
-                
-                with col2:
-                    show_only_changes = st.checkbox("Show only changes", False)
-                
-                # Create diff analyzer
-                diff_analyzer = HTMLDiffAnalyzer(
-                    selected_result['raw_html'],
-                    selected_result['rendered_html']
-                )
-                
-                # Display the working diff viewer
-                stats = create_streamlit_diff_viewer(
-                    diff_analyzer,
-                    search_term=search_term,
-                    show_only_changes=show_only_changes
-                )
-                
-                # Show detailed insights
-                st.subheader("Change Insights")
-                display_diff_insights(diff_analyzer)
-                
-                # Export options
-                st.subheader("Export Options")
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.download_button(
-                        "📥 Download Original HTML",
-                        selected_result['raw_html'],
-                        f"original_{selected_url.replace('https://', '').replace('/', '_')}.html",
-                        mime="text/html"
-                    )
-                
-                with col2:
-                    st.download_button(
-                        "📥 Download Rendered HTML",
-                        selected_result['rendered_html'],
-                        f"rendered_{selected_url.replace('https://', '').replace('/', '_')}.html",
-                        mime="text/html"
-                    )
-                
-                with col3:
-                    diff_lines = diff_analyzer.generate_diff()
-                    diff_text = '\n'.join(diff_lines)
-                    st.download_button(
-                        "📥 Download Diff Report",
-                        diff_text,
-                        f"diff_{selected_url.replace('https://', '').replace('/', '_')}.diff",
-                        mime="text/plain"
-                    )
-            
-            else:
-                st.warning("HTML data not available for this URL. Please re-crawl to generate diff data.")
-    
-    else:
-        st.info("No URLs with HTML diff data available. Please crawl some URLs first.")
-
-# Sidebar Configuration
+# Sidebar Configuration (same as before)
 with st.sidebar:
     st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
     st.header("🔧 Crawler Configuration")
 
     st.info("Concurrency is limited to 1 on this hosted version for stability. Run locally for more power.")
-    concurrent_requests = 1  # Hardcoded for stability on Render
+    concurrent_requests = 1 # Hardcoded for stability on Render
 
     # Basic settings
     st.subheader("Basic Settings")
@@ -660,34 +694,44 @@ def crawl_single_url(url, driver_manager, config):
         'rendered_html': ''  # Store rendered HTML for diff
     }
     
+    raw_html = "" # Initialize raw_html outside try block
+    rendered_html = "" # Initialize rendered_html outside try block
+
+    # --- Step 1: Fetch Raw HTML ---
     try:
-        # Fetch raw HTML
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+            'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
         }
         
         raw_response = requests.get(url, headers=headers, timeout=config['timeout'])
+        result['status_code'] = raw_response.status_code
         # This will raise an HTTPError for 4xx or 5xx status codes, ensuring we stop processing failed URLs.
         raw_response.raise_for_status()
 
         raw_html = raw_response.text
-        raw_response_time = time.time() - start_time
-        
-        result['status_code'] = raw_response.status_code
-        result['response_time'] = raw_response_time
-        result['size_bytes'] = len(raw_html.encode('utf-8'))
-        result['raw_html_size'] = result['size_bytes']
-        result['raw_html'] = raw_html  # Store for diff
-        
+        result['raw_html'] = raw_html  # Store raw HTML for diff if successful
+        result['raw_html_size'] = len(raw_html.encode('utf-8'))
+        result['size_bytes'] = result['raw_html_size'] # Initial size
+        result['response_time'] = time.time() - start_time # Time for initial request
+
+    except requests.exceptions.RequestException as e:
+        # If the initial request fails, record the error and stop processing this URL.
+        if hasattr(e, 'response') and e.response is not None:
+            result['status_code'] = e.response.status_code
+        result['errors'].append(f"Initial request failed: {str(e)}")
+        result['response_time'] = time.time() - start_time # Record time even for failure
+        return result
+
+    # --- Step 2: Get Rendered HTML using WebDriver (only if raw HTML fetch was successful) ---
+    try:
         # Parse raw HTML
         raw_soup = BeautifulSoup(raw_html, 'html.parser')
         
         # Get rendered HTML using WebDriver
         driver = driver_manager.get_driver()
-        rendered_html = ""
         
         if driver:
             try:
@@ -709,8 +753,13 @@ def crawl_single_url(url, driver_manager, config):
             except Exception as e:
                 result['errors'].append(f"Selenium error: {str(e)}")
         
-        # Parse rendered HTML
-        rendered_soup = BeautifulSoup(rendered_html, 'html.parser') if rendered_html else raw_soup
+    except Exception as e:
+        result['errors'].append(f"Selenium rendering error: {str(e)}")
+
+    # --- Step 3: Analyze HTML (both raw and rendered) ---
+    try:
+        # Use rendered_html if available, otherwise fall back to raw_html for analysis
+        rendered_soup = BeautifulSoup(rendered_html if rendered_html else raw_html, 'html.parser')
         
         # Calculate JavaScript impact
         if rendered_html:
@@ -754,7 +803,7 @@ def crawl_single_url(url, driver_manager, config):
         result['speed_score'] = analyze_page_speed(result['response_time'], result['size_bytes'])
         
     except Exception as e:
-        result['errors'].append(f"General error: {str(e)}")
+        result['errors'].append(f"Processing error during analysis: {str(e)}")
     
     result['response_time'] = time.time() - start_time
     return result
@@ -772,6 +821,7 @@ def parse_sitemap(sitemap_url):
     except Exception as e:
         st.error(f"Failed to parse sitemap: {e}")
     return urls
+
 
 # Main interface
 col1, col2 = st.columns([2, 1])
@@ -879,7 +929,7 @@ if st.session_state.crawl_running and urls_to_crawl:
                     
                 try:
                     # Get the result from the future
-                    result = future.result(timeout=page_timeout + 15)  # Increased timeout for safety
+                    result = future.result(timeout=page_timeout + 15) # Increased timeout for safety
                     st.session_state.crawl_results.append(result)                    
                     progress = (index + 1) / len(urls_to_crawl)
                     progress_bar.progress(progress)
@@ -889,7 +939,7 @@ if st.session_state.crawl_running and urls_to_crawl:
                     # If the future failed, create a partial result to record the error
                     error_result = {'url': url, 'status_code': 'Error', 'errors': [str(e)]}
                     st.session_state.crawl_results.append(error_result)
-                    st.warning(f"Failed to process {url}: {e}")  # Use warning for non-blocking errors
+                    st.warning(f"Failed to process {url}: {e}") # Use warning for non-blocking errors
     
     # Cleanup
     if st.session_state.driver_manager:
@@ -955,10 +1005,172 @@ if st.session_state.crawl_results:
                 return 'background-color: #f8d7da'
         
         styled_df = display_df.style.map(color_status, subset=['status_code'])
-        st.dataframe(styled_df, use_container_width=True, height=400)
+        st.dataframe(styled_df, use_container_width=True, height=400) # use_container_width is correct for st.dataframe
     
     with result_tabs[1]:  # HTML Diff Viewer tab
-        show_diff_viewer_tab(st.session_state.crawl_results)
+        st.subheader("🔍 HTML Diff Viewer")
+        st.write("Compare original HTML with JavaScript-rendered HTML to see what changes after page load.")
+        
+        # URL selector
+        urls_with_data = [r['url'] for r in st.session_state.crawl_results if r.get('raw_html')] # Show if raw HTML is available
+        
+        if urls_with_data:
+            selected_url = st.selectbox(
+                "Select URL to analyze:",
+                urls_with_data,
+                key="diff_url_selector"
+            )
+            
+            if selected_url:
+                # Find the result for this URL
+                selected_result = next((r for r in st.session_state.crawl_results if r['url'] == selected_url), None)
+                
+                # Ensure raw_html is present. rendered_html might be empty if Selenium failed.
+                if selected_result and selected_result.get('raw_html'):
+                    # Provide an empty string for rendered_html if it's missing
+                    rendered_html_for_diff = selected_result.get('rendered_html', '')
+                    # Diff analysis controls
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        search_term = st.text_input("🔍 Search in HTML:", placeholder="Enter search term...")
+                    
+                    with col2:
+                        show_only_changes = st.checkbox("Show only changes", False)
+                    
+                    with col3:
+                        auto_scroll_to_changes = st.checkbox("Auto-scroll to changes", True)
+                    
+                    # Category filters
+                    st.write("**Filter by change type:**")
+                    filter_cols = st.columns(6)
+                    
+                    with filter_cols[0]:
+                        show_js = st.checkbox("JavaScript", True)
+                    with filter_cols[1]:
+                        show_meta = st.checkbox("Metadata", True)
+                    with filter_cols[2]:
+                        show_content = st.checkbox("Content", True)
+                    with filter_cols[3]:
+                        show_styles = st.checkbox("Stylesheets", True)
+                    with filter_cols[4]:
+                        show_attributes = st.checkbox("Attributes", True)
+                    with filter_cols[5]:
+                        show_other = st.checkbox("Other", True)
+                    
+                    # Create diff analyzer
+                    diff_analyzer = HTMLDiffAnalyzer(
+                        selected_result['raw_html'],
+                        rendered_html_for_diff # Use the potentially empty string
+                    )
+                    
+                    # Get statistics
+                    stats = diff_analyzer.get_change_statistics()
+                    
+                    # Display key metrics
+                    st.subheader("📊 Diff Statistics")
+                    
+                    metric_cols = st.columns(6)
+                    with metric_cols[0]:
+                        st.metric("Lines Added", stats['lines_added'])
+                    with metric_cols[1]:
+                        st.metric("Lines Removed", stats['lines_removed'])
+                    with metric_cols[2]:
+                        st.metric("Lines Modified", stats['lines_modified'])
+                    with metric_cols[3]:
+                        st.metric("JS Injections", stats['js_injections'])
+                    with metric_cols[4]:
+                        st.metric("Meta Changes", stats['meta_changes'])
+                    with metric_cols[5]:
+                        similarity_pct = stats['similarity_ratio'] * 100
+                        st.metric("Similarity", f"{similarity_pct:.1f}%")
+                    
+                    # Export diff options
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if st.button("📥 Download Original HTML"):
+                            st.download_button(
+                                "Download",
+                                selected_result['raw_html'],
+                                f"original_{selected_url.replace('https://', '').replace('/', '_')}.html",
+                                mime="text/html"
+                            )
+                    
+                    with col2:
+                        if st.button("📥 Download Rendered HTML"):
+                            st.download_button(
+                                "Download",
+                                selected_result['rendered_html'],
+                                f"rendered_{selected_url.replace('https://', '').replace('/', '_')}.html",
+                                mime="text/html"
+                            )
+                    
+                    with col3:
+                        if st.button("📥 Download Diff Report"):
+                            diff_lines = diff_analyzer.generate_diff()
+                            diff_text = '\n'.join(diff_lines)
+                            st.download_button(
+                                "Download",
+                                diff_text,
+                                f"diff_{selected_url.replace('https://', '').replace('/', '_')}.diff",
+                                mime="text/plain"
+                            )
+                    
+                    # Create and display diff viewer
+                    st.subheader("🔄 Side-by-Side HTML Comparison")
+                    if not rendered_html_for_diff:
+                        st.warning("Rendered HTML is not available for this URL. Displaying raw HTML vs. empty content.")
+
+                    
+                    diff_html = create_diff_viewer_html(
+                        diff_analyzer,
+                        search_term=search_term,
+                        show_only_changes=show_only_changes
+                    )
+                    
+                    # Display the diff viewer
+                    st.markdown(diff_html, unsafe_allow_html=True)
+                    
+                    # Additional insights
+                    st.subheader("💡 Change Insights")
+                    
+                    changes = diff_analyzer.get_detailed_changes()
+                    
+                    if changes:
+                        # Group changes by category
+                        change_categories = defaultdict(list)
+                        for change in changes:
+                            change_categories[change['category']].append(change)
+                        
+                        # Display insights by category
+                        for category, category_changes in change_categories.items():
+                            if category_changes:
+                                with st.expander(f"📝 {category.title()} Changes ({len(category_changes)})"):
+                                    for i, change in enumerate(category_changes[:10]):  # Limit to first 10
+                                        st.write(f"**Change {i+1}:** {change['type'].title()}")
+                                        
+                                        if change['original_lines']:
+                                            st.write("**Original:**")
+                                            st.code('\n'.join(change['original_lines'][:3]), language='html')
+                                        
+                                        if change['rendered_lines']:
+                                            st.write("**Rendered:**")
+                                            st.code('\n'.join(change['rendered_lines'][:3]), language='html')
+                                        
+                                        st.markdown("---")
+                                    
+                                    if len(category_changes) > 10:
+                                        st.info(f"... and {len(category_changes) - 10} more {category} changes")
+                    
+                    else:
+                        st.info("No significant changes detected between original and rendered HTML.")
+                
+                else:
+                    st.warning("Raw HTML data not available for this URL. Please re-crawl to generate diff data.")
+        
+        else:
+            st.info("No URLs with HTML diff data available. Please crawl some URLs first.")
     
     with result_tabs[2]:  # Performance tab
         col1, col2 = st.columns(2)
@@ -968,14 +1180,14 @@ if st.session_state.crawl_results:
             fig = px.histogram(results_df, x='response_time', 
                              title='Response Time Distribution',
                              labels={'response_time': 'Response Time (seconds)'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         
         with col2:
             # Speed score vs page size
             fig = px.scatter(results_df, x='size_bytes', y='speed_score',
                            title='Speed Score vs Page Size',
                            labels={'size_bytes': 'Page Size (bytes)', 'speed_score': 'Speed Score'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
     
     with result_tabs[3]:  # JavaScript Impact tab
         col1, col2 = st.columns(2)
@@ -985,7 +1197,7 @@ if st.session_state.crawl_results:
             fig = px.histogram(results_df, x='js_percentage',
                              title='JavaScript Impact Distribution',
                              labels={'js_percentage': 'JS Impact (%)'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         
         with col2:
             # SPA detection
@@ -1003,7 +1215,7 @@ if st.session_state.crawl_results:
                 
                 fig = px.pie(values=spa_values, names=spa_labels,
                             title='SPA vs Traditional Pages')
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No SPA data available")
     
@@ -1015,14 +1227,14 @@ if st.session_state.crawl_results:
             fig = px.histogram(results_df, x='seo_score',
                              title='SEO Score Distribution',
                              labels={'seo_score': 'SEO Score'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         
         with col2:
             # Title length analysis
             title_lengths = [len(r.get('seo_data', {}).get('title', '')) for r in st.session_state.crawl_results]
             fig = px.histogram(x=title_lengths, title='Title Length Distribution',
                              labels={'x': 'Title Length (characters)'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
     
     with result_tabs[5]:  # Technologies tab
         # Technology usage
@@ -1035,7 +1247,7 @@ if st.session_state.crawl_results:
             fig = px.bar(x=list(tech_counts.keys()), y=list(tech_counts.values()),
                         title='Technology Usage',
                         labels={'x': 'Technology', 'y': 'Usage Count'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("No technologies detected in crawled pages")
     
@@ -1082,7 +1294,7 @@ if st.session_state.crawl_results:
                 return 'background-color: #cce5ff'
         
         styled_issues = issues_df.style.map(color_severity, subset=['Severity'])
-        st.dataframe(styled_issues, use_container_width=True)
+        st.dataframe(styled_issues, use_container_width=True) # use_container_width is correct for st.dataframe
     else:
         st.success("🎉 No major issues detected!")
 
@@ -1118,4 +1330,4 @@ st.markdown("""
 - Use the **HTML Diff Viewer** to understand JavaScript impact on page structure
 - **Search within diffs** to find specific changes or elements
 - **Export diff reports** for documentation and analysis
-""")
+""", unsafe_allow_html=True)
