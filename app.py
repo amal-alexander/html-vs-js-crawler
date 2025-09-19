@@ -908,15 +908,18 @@ if st.session_state.crawl_running and urls_to_crawl:
                     break
                     
                 try:
-                    result = future.result(timeout=page_timeout + 10)
-                    st.session_state.crawl_results.append(result)
-                    
+                    # Get the result from the future
+                    result = future.result(timeout=page_timeout + 15) # Increased timeout for safety
+                    st.session_state.crawl_results.append(result)                    
                     progress = (index + 1) / len(urls_to_crawl)
                     progress_bar.progress(progress)
                     status_text.text(f"Processed: {url}")
                     
                 except Exception as e:
-                    st.error(f"Failed to process {url}: {e}")
+                    # If the future failed, create a partial result to record the error
+                    error_result = {'url': url, 'status_code': 'Error', 'errors': [str(e)]}
+                    st.session_state.crawl_results.append(error_result)
+                    st.warning(f"Failed to process {url}: {e}") # Use warning for non-blocking errors
     
     # Cleanup
     if st.session_state.driver_manager:
