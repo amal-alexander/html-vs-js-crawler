@@ -260,8 +260,8 @@ class WebDriverManager:
             # Use a consistent, modern User-Agent for both requests and Selenium
             user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
             options.add_argument(f"user-agent={user_agent}")
-
-            # Performance settings to disable images and notifications
+            
+            # Performance settings
             prefs = {
                 "profile.managed_default_content_settings.images": 2,
                 "profile.default_content_settings.popups": 0,
@@ -288,7 +288,6 @@ class WebDriverManager:
                     st.warning(f"Error while quitting WebDriver: {e}")
                 finally:
                     self.driver = None
-
 
 class HTMLDiffAnalyzer:
     def __init__(self, original_html, rendered_html):
@@ -515,7 +514,6 @@ with st.sidebar:
 
     # Basic settings
     st.subheader("Basic Settings")
-    concurrent_requests = st.slider("Concurrent Requests", 1, 5, 3)
     page_timeout = st.slider("Page Timeout (seconds)", 5, 30, 10)
     js_wait_time = st.slider("JS Wait Time (seconds)", 1, 10, 3)
     
@@ -693,7 +691,7 @@ def crawl_single_url(url, driver_manager, config):
         'raw_html': '',  # Store raw HTML for diff
         'rendered_html': ''  # Store rendered HTML for diff
     }
-    
+
     raw_html = "" # Initialize raw_html outside try block
     rendered_html = "" # Initialize rendered_html outside try block
 
@@ -1121,7 +1119,6 @@ if st.session_state.crawl_results:
                     st.subheader("🔄 Side-by-Side HTML Comparison")
                     if not rendered_html_for_diff:
                         st.warning("Rendered HTML is not available for this URL. Displaying raw HTML vs. empty content.")
-
                     
                     diff_html = create_diff_viewer_html(
                         diff_analyzer,
