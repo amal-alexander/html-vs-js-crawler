@@ -256,6 +256,14 @@ class WebDriverManager:
             options.add_argument("--window-size=1920,1080")
             options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
 
+            # Performance settings to disable images and notifications
+            prefs = {
+                "profile.managed_default_content_settings.images": 2,
+                "profile.default_content_settings.popups": 0,
+                "profile.default_content_setting_values.notifications": 2
+            }
+            options.add_experimental_option("prefs", prefs)
+
             # Use webdriver-manager to handle driver installation
             service = ChromeService(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
@@ -276,14 +284,6 @@ class WebDriverManager:
                 finally:
                     self.driver = None
 
-
-            # Performance settings
-            prefs = {
-                "profile.managed_default_content_settings.images": 2,
-                "profile.default_content_settings.popups": 0,
-                "profile.default_content_setting_values.notifications": 2
-            }
-            options.add_experimental_option("prefs", prefs)
 
 class HTMLDiffAnalyzer:
     def __init__(self, original_html, rendered_html):
