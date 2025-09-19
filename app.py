@@ -253,8 +253,13 @@ class WebDriverManager:
             options.add_argument("--disable-gpu")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-renderer-backgrounding")
+            options.add_argument("--disable-backgrounding-occluded-windows")
             options.add_argument("--window-size=1920,1080")
-            options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
+            # Use a consistent, modern User-Agent for both requests and Selenium
+            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
+            options.add_argument(f"user-agent={user_agent}")
 
             # Performance settings to disable images and notifications
             prefs = {
@@ -692,7 +697,7 @@ def crawl_single_url(url, driver_manager, config):
     try:
         # Fetch raw HTML
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+            'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -984,8 +989,8 @@ if st.session_state.crawl_results:
             else:
                 return 'background-color: #f8d7da'
         
-        styled_df = display_df.style.applymap(color_status, subset=['status_code'])
-        st.dataframe(styled_df, use_container_width=True, height=400)
+        styled_df = display_df.style.map(color_status, subset=['status_code'])
+        st.dataframe(styled_df, use_container_width=True, height=400) # use_container_width is correct for st.dataframe
     
     with result_tabs[1]:  # HTML Diff Viewer tab
         st.subheader("🔍 HTML Diff Viewer")
@@ -1154,14 +1159,14 @@ if st.session_state.crawl_results:
             fig = px.histogram(results_df, x='response_time', 
                              title='Response Time Distribution',
                              labels={'response_time': 'Response Time (seconds)'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         
         with col2:
             # Speed score vs page size
             fig = px.scatter(results_df, x='size_bytes', y='speed_score',
                            title='Speed Score vs Page Size',
                            labels={'size_bytes': 'Page Size (bytes)', 'speed_score': 'Speed Score'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
     
     with result_tabs[3]:  # JavaScript Impact tab
         col1, col2 = st.columns(2)
@@ -1171,7 +1176,7 @@ if st.session_state.crawl_results:
             fig = px.histogram(results_df, x='js_percentage',
                              title='JavaScript Impact Distribution',
                              labels={'js_percentage': 'JS Impact (%)'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         
         with col2:
             # SPA detection
@@ -1189,7 +1194,7 @@ if st.session_state.crawl_results:
                 
                 fig = px.pie(values=spa_values, names=spa_labels,
                             title='SPA vs Traditional Pages')
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info("No SPA data available")
     
@@ -1201,14 +1206,14 @@ if st.session_state.crawl_results:
             fig = px.histogram(results_df, x='seo_score',
                              title='SEO Score Distribution',
                              labels={'seo_score': 'SEO Score'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         
         with col2:
             # Title length analysis
             title_lengths = [len(r.get('seo_data', {}).get('title', '')) for r in st.session_state.crawl_results]
             fig = px.histogram(x=title_lengths, title='Title Length Distribution',
                              labels={'x': 'Title Length (characters)'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
     
     with result_tabs[5]:  # Technologies tab
         # Technology usage
@@ -1221,7 +1226,7 @@ if st.session_state.crawl_results:
             fig = px.bar(x=list(tech_counts.keys()), y=list(tech_counts.values()),
                         title='Technology Usage',
                         labels={'x': 'Technology', 'y': 'Usage Count'})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("No technologies detected in crawled pages")
     
@@ -1267,8 +1272,8 @@ if st.session_state.crawl_results:
             else:
                 return 'background-color: #cce5ff'
         
-        styled_issues = issues_df.style.applymap(color_severity, subset=['Severity'])
-        st.dataframe(styled_issues, use_container_width=True)
+        styled_issues = issues_df.style.map(color_severity, subset=['Severity'])
+        st.dataframe(styled_issues, use_container_width=True) # use_container_width is correct for st.dataframe
     else:
         st.success("🎉 No major issues detected!")
 
