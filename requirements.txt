@@ -1,42 +1,27 @@
 # Core web framework
 streamlit>=1.28.0
 
-# Web scraping and HTTP requests
+# Web scraping, parsing, and HTTP requests
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
+html5lib>=1.1
 
 # Selenium WebDriver for JavaScript rendering
 selenium>=4.15.0
+webdriver-manager>=4.0.0
 
 # Data manipulation and analysis
 pandas>=2.1.0
-numpy>=1.24.0
 
 # Interactive plotting and visualization
 plotly>=5.17.0
 
-# HTML parsing additional support
-html5lib>=1.1
-
-# For concurrent processing (built-in, but good to specify if using specific versions)
-# concurrent.futures is built-in to Python 3.2+
-
 # Optional: If you want to add Excel export functionality
-# openpyxl>=3.1.0
-# xlsxwriter>=3.1.0
-
-# Optional: For more robust URL parsing and validation
-# urllib3>=2.0.0
-
-# Optional: For enhanced concurrent processing
-# aiohttp>=3.8.0
-# asyncio (built-in)
-
-# Development and debugging (optional)
-# python-dotenv>=1.0.0
+openpyxl>=3.1.0
 
 # System requirements notes:
-# - Chrome/Chromium browser must be installed
-# - ChromeDriver must be available in PATH or specify path in selenium options
-# - For headless operation, ensure display drivers are available
+# - A compatible version of Chrome/Chromium browser must be installed in the environment.
+# - webdriver-manager handles the ChromeDriver installation automatically.
+# - For headless operation on Linux, system dependencies for Chrome are required.
+#   (e.g., via `apt-get install -y google-chrome-stable`)
