@@ -6,6 +6,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import time
 import re
@@ -227,56 +229,54 @@ if 'crawl_results' not in st.session_state:
 if 'crawl_running' not in st.session_state:
     st.session_state.crawl_running = False
 if 'driver_pool' not in st.session_state:
-    st.session_state.driver_pool = []
+    st.session_state.driver_manager = None # Changed from driver_pool
 if 'selected_url_for_diff' not in st.session_state:
     st.session_state.selected_url_for_diff = None
 
-class WebDriverPool:
-    def __init__(self, pool_size=3):
-        self.pool = []
-        self.pool_size = pool_size
-        self.in_use = set()
-        
+class WebDriverManager:
+    """Manages a single, reusable WebDriver instance for stability in cloud environments."""
+    def __init__(self):
+        self.driver = None
+        self._lock = threading.Lock()
+
     def get_driver(self):
-        # Find available driver
-        for i, driver in enumerate(self.pool):
-            if i not in self.in_use:
-                self.in_use.add(i)
-                return driver, i
-        
-        # Create new driver if pool not full
-        if len(self.pool) < self.pool_size:
-            driver = self._create_driver()
-            if driver:
-                self.pool.append(driver)
-                driver_id = len(self.pool) - 1
-                self.in_use.add(driver_id)
-                return driver, driver_id
-        
-        return None, None
-    
-    def return_driver(self, driver_id):
-        if driver_id in self.in_use:
-            self.in_use.remove(driver_id)
-    
+        with self._lock:
+            if self.driver is None:
+                self.driver = self._create_driver()
+            return self.driver
+
     def _create_driver(self):
         try:
+            st.info("Initializing WebDriver... This may take a moment.")
             options = Options()
             options.add_argument("--headless=new")
             options.add_argument("--disable-gpu")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--disable-extensions")
-            options.add_argument("--disable-plugins")
-            options.add_argument("--disable-images")
-            options.add_argument("--disable-javascript-harmony-shipping")
-            options.add_argument("--disable-background-timer-throttling")
-            options.add_argument("--disable-renderer-backgrounding")
-            options.add_argument("--disable-backgrounding-occluded-windows")
             options.add_argument("--window-size=1920,1080")
-            options.add_experimental_option('useAutomationExtension', False)
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            
+            options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
+
+            # Use webdriver-manager to handle driver installation
+            service = ChromeService(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
+            st.success("WebDriver initialized successfully.")
+            return driver
+        except Exception as e:
+            st.error(f"Fatal Error: Failed to create WebDriver. The service may not be able to run. Error: {e}")
+            st.stop()
+            return None
+
+    def cleanup(self):
+        with self._lock:
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except Exception as e:
+                    st.warning(f"Error while quitting WebDriver: {e}")
+                finally:
+                    self.driver = None
+
+
             # Performance settings
             prefs = {
                 "profile.managed_default_content_settings.images": 2,
@@ -284,20 +284,6 @@ class WebDriverPool:
                 "profile.default_content_setting_values.notifications": 2
             }
             options.add_experimental_option("prefs", prefs)
-            
-            return webdriver.Chrome(options=options)
-        except Exception as e:
-            st.error(f"Failed to create WebDriver: {e}")
-            return None
-    
-    def cleanup(self):
-        for driver in self.pool:
-            try:
-                driver.quit()
-            except:
-                pass
-        self.pool.clear()
-        self.in_use.clear()
 
 class HTMLDiffAnalyzer:
     def __init__(self, original_html, rendered_html):
@@ -518,7 +504,10 @@ def create_diff_viewer_html(diff_analyzer, search_term="", show_only_changes=Fal
 with st.sidebar:
     st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
     st.header("🔧 Crawler Configuration")
-    
+
+    st.info("Concurrency is limited to 1 on this hosted version for stability. Run locally for more power.")
+    concurrent_requests = 1 # Hardcoded for stability on Render
+
     # Basic settings
     st.subheader("Basic Settings")
     concurrent_requests = st.slider("Concurrent Requests", 1, 5, 3)
@@ -676,7 +665,7 @@ def detect_technologies(soup, response_headers):
     
     return technologies
 
-def crawl_single_url(url, driver_pool, config):
+def crawl_single_url(url, driver_manager, config):
     """Crawl a single URL and return comprehensive analysis including raw HTML"""
     start_time = time.time()
     result = {
@@ -720,7 +709,7 @@ def crawl_single_url(url, driver_pool, config):
         raw_soup = BeautifulSoup(raw_html, 'html.parser')
         
         # Get rendered HTML using WebDriver
-        driver, driver_id = driver_pool.get_driver()
+        driver = driver_manager.get_driver()
         rendered_html = ""
         
         if driver:
@@ -742,8 +731,6 @@ def crawl_single_url(url, driver_pool, config):
                 
             except Exception as e:
                 result['errors'].append(f"Selenium error: {str(e)}")
-            finally:
-                driver_pool.return_driver(driver_id)
         
         # Parse rendered HTML
         rendered_soup = BeautifulSoup(rendered_html, 'html.parser') if rendered_html else raw_soup
@@ -795,6 +782,21 @@ def crawl_single_url(url, driver_pool, config):
     result['response_time'] = time.time() - start_time
     return result
 
+def parse_sitemap(sitemap_url):
+    """Fetches and parses a sitemap URL to extract all contained URLs."""
+    urls = []
+    try:
+        response = requests.get(sitemap_url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'xml')
+        locs = soup.find_all('loc')
+        urls = [loc.text for loc in locs]
+        st.success(f"Found {len(urls)} URLs in sitemap.")
+    except Exception as e:
+        st.error(f"Failed to parse sitemap: {e}")
+    return urls
+
+
 # Main interface
 col1, col2 = st.columns([2, 1])
 
@@ -812,7 +814,9 @@ with col1:
     
     else:  # Sitemap
         sitemap_url = st.text_input("Sitemap URL:", "https://example.com/sitemap.xml")
-        urls_to_crawl = []  # TODO: Implement sitemap parsing
+        urls_to_crawl = []
+        if sitemap_url and st.button("Fetch URLs from Sitemap"):
+            urls_to_crawl = parse_sitemap(sitemap_url)
 
 with col2:
     st.subheader("📊 Quick Stats")
@@ -844,6 +848,9 @@ with col2:
 with col3:
     if st.button("🗑️ Clear Results"):
         st.session_state.crawl_results = []
+        if st.session_state.driver_manager:
+            st.session_state.driver_manager.cleanup()
+            st.session_state.driver_manager = None
         st.session_state.selected_url_for_diff = None
         st.rerun()
 
@@ -855,11 +862,17 @@ with col4:
             csv = df.to_csv(index=False)
             st.download_button("💾 Export CSV", csv, "crawl_results.csv", "text/csv")
         elif export_format == "Excel":
-            st.info("Excel export requires openpyxl package")
+            from io import BytesIO
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Crawl Results')
+            excel_data = output.getvalue()
+            st.download_button("💾 Export Excel", excel_data, "crawl_results.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # Crawling logic
 if st.session_state.crawl_running and urls_to_crawl:
-    driver_pool = WebDriverPool(concurrent_requests)
+    if st.session_state.driver_manager is None:
+        st.session_state.driver_manager = WebDriverManager()
     
     config = {
         'timeout': page_timeout,
@@ -880,7 +893,7 @@ if st.session_state.crawl_running and urls_to_crawl:
                 if not st.session_state.crawl_running:
                     break
                     
-                future = executor.submit(crawl_single_url, url, driver_pool, config)
+                future = executor.submit(crawl_single_url, url, st.session_state.driver_manager, config)
                 futures.append((future, url, i))
             
             # Collect results
@@ -900,7 +913,9 @@ if st.session_state.crawl_running and urls_to_crawl:
                     st.error(f"Failed to process {url}: {e}")
     
     # Cleanup
-    driver_pool.cleanup()
+    if st.session_state.driver_manager:
+        st.session_state.driver_manager.cleanup()
+        st.session_state.driver_manager = None
     st.session_state.crawl_running = False
     st.success("🎉 Crawling completed!")
     st.rerun()
