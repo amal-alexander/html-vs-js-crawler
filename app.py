@@ -692,10 +692,16 @@ def crawl_single_url(url, driver_manager, config):
     try:
         # Fetch raw HTML
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
         }
         
         raw_response = requests.get(url, headers=headers, timeout=config['timeout'])
+        # This will raise an HTTPError for 4xx or 5xx status codes, ensuring we stop processing failed URLs.
+        raw_response.raise_for_status()
+
         raw_html = raw_response.text
         raw_response_time = time.time() - start_time
         
