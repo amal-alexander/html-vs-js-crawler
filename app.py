@@ -22,7 +22,7 @@ import plotly.graph_objects as go
 from collections import Counter, defaultdict
 import difflib
 import html
-
+import os
 # Define a consistent, modern User-Agent to avoid being blocked
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
@@ -413,13 +413,13 @@ class WebDriverManager:
             }
             options.add_experimental_option("prefs", prefs)
 
-            # In a containerized environment like Streamlit Cloud, it's more reliable
-            # to use the pre-installed driver.
+            # For Streamlit Cloud, use the system-installed driver.
+            # The path `/usr/bin/chromedriver` is standard in these environments.
             if os.path.exists("/usr/bin/chromedriver"):
-                 st.info("System chromedriver found. Using system driver.")
-                 service = ChromeService(executable_path="/usr/bin/chromedriver")
+                st.info("System chromedriver found. Using system driver.")
+                service = ChromeService(executable_path="/usr/bin/chromedriver")
             else:
-                # Fallback to webdriver-manager for local development or other environments.
+                # For local development, fall back to webdriver-manager.
                 st.info("System chromedriver not found. Using webdriver-manager to download driver.")
                 service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
 
