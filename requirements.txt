@@ -1,5 +1,5 @@
 # Core web framework
-streamlit>=1.28.0
+streamlit==1.33.0
 
 # Web scraping, parsing, and HTTP requests
 requests>=2.31.0
