@@ -23,9 +23,11 @@ from collections import Counter, defaultdict
 import difflib
 import html
 import os
+import subprocess
+import shutil
+
 # Define a consistent, modern User-Agent to avoid being blocked
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-
 
 # Page configuration
 st.set_page_config(
@@ -332,43 +334,11 @@ st.markdown("""
         background: #6f42c1;
         color: white;
     }
-    
-    .filter-controls {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 20px;
-        flex-wrap: wrap;
-        padding: 15px;
-        background: #f8f9fa;
-        border-radius: 8px;
-    }
-    
-    .filter-button {
-        padding: 8px 15px;
-        border: 2px solid #ddd;
-        border-radius: 20px;
-        background: white;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: bold;
-        transition: all 0.3s ease;
-    }
-    
-    .filter-button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    
-    .filter-button.active {
-        background: #667eea;
-        color: white;
-        border-color: #667eea;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # Main header
-st.markdown('<div class="main-header"><h1>🕷️ HTML vs JS Crawler Pro</h1><p>Professional-grade website analysis tool with enhanced JavaScript injection detection</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1>HTML vs JS Crawler Pro</h1><p>Professional-grade website analysis tool with enhanced JavaScript injection detection</p></div>', unsafe_allow_html=True)
 
 # Initialize session state
 if 'crawl_results' not in st.session_state:
@@ -379,6 +349,21 @@ if 'driver_manager' not in st.session_state:
     st.session_state.driver_manager = None
 if 'selected_url_for_diff' not in st.session_state:
     st.session_state.selected_url_for_diff = None
+
+def check_chrome_installation():
+    """Check if Chrome is properly installed"""
+    chrome_paths = [
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium'
+    ]
+    
+    for path in chrome_paths:
+        if os.path.exists(path):
+            return path
+    
+    return None
 
 class WebDriverManager:
     """Manages a single, reusable WebDriver instance for stability in cloud environments."""
@@ -395,42 +380,61 @@ class WebDriverManager:
     def _create_driver(self):
         try:
             st.info("Initializing WebDriver... This may take a moment.")
+            
+            # Check Chrome installation
+            chrome_path = check_chrome_installation()
+            if not chrome_path:
+                st.error("Chrome browser not found. Please check your installation.")
+                return None
+            
             options = Options()
             options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-gpu")
             options.add_argument("--disable-extensions")
             options.add_argument("--disable-renderer-backgrounding")
             options.add_argument("--disable-backgrounding-occluded-windows")
+            options.add_argument("--disable-background-timer-throttling")
+            options.add_argument("--disable-features=TranslateUI")
+            options.add_argument("--disable-ipc-flooding-protection")
             options.add_argument("--window-size=1920,1080")
+            options.add_argument("--single-process")
+            options.add_argument("--disable-web-security")
+            options.add_argument("--disable-features=VizDisplayCompositor")
             options.add_argument(f"user-agent={USER_AGENT}")
             
+            # Set binary location
+            options.binary_location = chrome_path
+            
+            # Performance optimizations
             prefs = {
                 "profile.managed_default_content_settings.images": 2,
                 "profile.default_content_settings.popups": 0,
-                "profile.default_content_setting_values.notifications": 2
+                "profile.default_content_setting_values.notifications": 2,
+                "profile.default_content_settings.geolocation": 2,
             }
             options.add_experimental_option("prefs", prefs)
 
-            # For Streamlit Cloud, Chrome is installed by setup.sh
-            if os.path.exists("/usr/bin/google-chrome-stable"):
-                st.info("Chrome binary found. Using system-installed Chrome.")
-                options.binary_location = "/usr/bin/google-chrome-stable"
-                # webdriver-manager will find the corresponding chromedriver
+            try:
+                # Try to use webdriver-manager for ChromeDriver
                 service = ChromeService(ChromeDriverManager().install())
-            else:
-                # For local development, fall back to webdriver-manager.
-                st.info("System Chrome not found. Using webdriver-manager to download Chromium.")
-                service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
+            except Exception as e:
+                st.warning(f"ChromeDriver auto-installation failed: {e}. Trying system ChromeDriver...")
+                # Fallback to system chromedriver
+                chromedriver_path = shutil.which('chromedriver')
+                if chromedriver_path:
+                    service = ChromeService(chromedriver_path)
+                else:
+                    raise Exception("ChromeDriver not found in system PATH")
 
             driver = webdriver.Chrome(service=service, options=options)
             st.success("WebDriver initialized successfully.")
             return driver
 
         except Exception as e:
-            st.error(f"Fatal Error: Failed to create WebDriver. The service may not be able to run. Error: {e}")
-            st.stop()
+            st.error(f"Failed to create WebDriver: {e}")
+            return None
 
     def cleanup(self):
         with self._lock:
@@ -792,47 +796,6 @@ def create_enhanced_diff_viewer(diff_analyzer, search_term="", show_only_changes
     
     return complete_html, js_injections, meta_changes, css_changes
 
-# Sidebar Configuration
-with st.sidebar:
-    st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
-    st.header("🔧 Crawler Configuration")
-
-    st.info("Concurrency is limited to 1 on this hosted version for stability. Run locally for more power.")
-    concurrent_requests = 1
-
-    # Basic settings
-    st.subheader("Basic Settings")
-    page_timeout = st.slider("Page Timeout (seconds)", 5, 30, 10)
-    enable_js_rendering = st.checkbox("Enable JavaScript Rendering", True, help="Enable to render JavaScript using a headless browser. Disabling this will only fetch the initial HTML and will be much faster.")
-    js_wait_time = st.slider("JS Wait Time (seconds)", 1, 10, 3)
-    
-    # Advanced settings
-    st.subheader("Advanced Options")
-    follow_redirects = st.checkbox("Follow Redirects", True)
-    check_images = st.checkbox("Analyze Images", False)
-    check_links = st.checkbox("Check Internal Links", False)
-    mobile_simulation = st.checkbox("Mobile Simulation", False)
-    
-    # Enhanced Diff Viewer Options
-    st.subheader("🔍 Enhanced Diff Viewer")
-    preserve_formatting = st.checkbox("Preserve HTML Formatting", True)
-    show_line_numbers = st.checkbox("Show Line Numbers", True)
-    highlight_js_changes = st.checkbox("Highlight JS Injections", True)
-    highlight_meta_changes = st.checkbox("Highlight Meta Changes", True)
-    highlight_css_changes = st.checkbox("Highlight CSS Changes", True)
-    context_lines = st.slider("Context Lines", 0, 10, 3)
-    
-    # Filtering
-    st.subheader("Content Filtering")
-    ignore_query_params = st.checkbox("Ignore Query Parameters", True)
-    exclude_patterns = st.text_area("Exclude URL Patterns (one per line)", placeholder="admin/\n/wp-content/\n.pdf")
-    
-    # Export options
-    st.subheader("Export Options")
-    export_format = st.selectbox("Export Format", ["CSV", "Excel", "JSON", "Issues (CSV)"])
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
 def analyze_page_speed(response_time, size_bytes):
     """Analyze page speed metrics"""
     speed_score = 100
@@ -983,13 +946,24 @@ def crawl_single_url(url, driver_manager, config):
 
     raw_html = ""
     rendered_html = ""
-    raw_response = None # To store the response from requests
+    raw_response = None
     use_selenium_for_all = False
 
-    # --- Step 1: Attempt to fetch with Requests (fast path) ---
+    # Step 1: Attempt to fetch with Requests (fast path)
     try:
         headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7', 'Accept-Encoding': 'gzip, deflate, br', 'Accept-Language': 'en-US,en;q=0.9', 'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"', 'Sec-Ch-Ua-Mobile': '?0', 'Sec-Ch-Ua-Platform': '"Windows"', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'none', 'Sec-Fetch-User': '?1', 'Upgrade-Insecure-Requests': '1', 'User-Agent': USER_AGENT,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7', 
+            'Accept-Encoding': 'gzip, deflate, br', 
+            'Accept-Language': 'en-US,en;q=0.9', 
+            'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"', 
+            'Sec-Ch-Ua-Mobile': '?0', 
+            'Sec-Ch-Ua-Platform': '"Windows"', 
+            'Sec-Fetch-Dest': 'document', 
+            'Sec-Fetch-Mode': 'navigate', 
+            'Sec-Fetch-Site': 'none', 
+            'Sec-Fetch-User': '?1', 
+            'Upgrade-Insecure-Requests': '1', 
+            'User-Agent': USER_AGENT,
         }
         
         raw_response = requests.get(url, headers=headers, timeout=config['timeout'])
@@ -1005,22 +979,20 @@ def crawl_single_url(url, driver_manager, config):
         result['errors'].append(f"Request failed: {str(e)}. Falling back to full Selenium mode.")
         use_selenium_for_all = True
 
-    # --- Step 2: Fetch with Selenium (if needed or enabled) ---
+    # Step 2: Fetch with Selenium (if needed or enabled)
     if config.get('enable_js', True):
         try:
             driver = driver_manager.get_driver()
             if not driver:
                 raise WebDriverException("Failed to get a WebDriver instance.")
 
-            # If requests failed, we must use Selenium for everything.
-            # If requests succeeded, we still use Selenium for the rendered view.
             driver.set_page_load_timeout(config['timeout'])
             driver.get(url)
 
             # If requests failed, Selenium's initial load is our "raw" HTML
             if use_selenium_for_all:
                 raw_html = driver.page_source
-                result['status_code'] = 200 # Assume success if Selenium loads it
+                result['status_code'] = 200
 
             # Wait for JS execution
             WebDriverWait(driver, config['timeout']).until(
@@ -1033,24 +1005,20 @@ def crawl_single_url(url, driver_manager, config):
 
         except (WebDriverException, TimeoutException) as e:
             result['errors'].append(f"Selenium processing failed: {str(e)}")
-            # If Selenium fails, we can't proceed with rendering.
-            # We might still have raw_html from requests, so we don't return yet.
-            rendered_html = raw_html # Fallback to raw_html if rendering fails
+            rendered_html = raw_html
         except Exception as e:
             result['errors'].append(f"An unexpected error occurred during Selenium processing: {str(e)}")
             rendered_html = raw_html
     else:
-        # If JS is disabled, rendered is the same as raw
         rendered_html = raw_html
 
-    # --- Step 3: Populate results and Analyze ---
+    # Step 3: Populate results and Analyze
     result['raw_html'] = raw_html
     result['rendered_html'] = rendered_html
     result['raw_html_size'] = len(raw_html.encode('utf-8'))
     result['rendered_html_size'] = len(rendered_html.encode('utf-8'))
-    result['size_bytes'] = result['raw_html_size'] # Base size on initial load
+    result['size_bytes'] = result['raw_html_size']
 
-    # If we failed to get any HTML at all, return early.
     if not raw_html and not rendered_html:
         result['response_time'] = time.time() - start_time
         return result
@@ -1120,11 +1088,52 @@ def parse_sitemap(sitemap_url):
         st.error(f"Failed to parse sitemap: {e}")
     return urls
 
+# Sidebar Configuration
+with st.sidebar:
+    st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
+    st.header("Crawler Configuration")
+
+    st.info("Concurrency is limited to 1 on this hosted version for stability. Run locally for more power.")
+    concurrent_requests = 1
+
+    # Basic settings
+    st.subheader("Basic Settings")
+    page_timeout = st.slider("Page Timeout (seconds)", 5, 30, 10)
+    enable_js_rendering = st.checkbox("Enable JavaScript Rendering", True, help="Enable to render JavaScript using a headless browser.")
+    js_wait_time = st.slider("JS Wait Time (seconds)", 1, 10, 3)
+    
+    # Advanced settings
+    st.subheader("Advanced Options")
+    follow_redirects = st.checkbox("Follow Redirects", True)
+    check_images = st.checkbox("Analyze Images", False)
+    check_links = st.checkbox("Check Internal Links", False)
+    mobile_simulation = st.checkbox("Mobile Simulation", False)
+    
+    # Enhanced Diff Viewer Options
+    st.subheader("Enhanced Diff Viewer")
+    preserve_formatting = st.checkbox("Preserve HTML Formatting", True)
+    show_line_numbers = st.checkbox("Show Line Numbers", True)
+    highlight_js_changes = st.checkbox("Highlight JS Injections", True)
+    highlight_meta_changes = st.checkbox("Highlight Meta Changes", True)
+    highlight_css_changes = st.checkbox("Highlight CSS Changes", True)
+    context_lines = st.slider("Context Lines", 0, 10, 3)
+    
+    # Filtering
+    st.subheader("Content Filtering")
+    ignore_query_params = st.checkbox("Ignore Query Parameters", True)
+    exclude_patterns = st.text_area("Exclude URL Patterns (one per line)", placeholder="admin/\n/wp-content/\n.pdf")
+    
+    # Export options
+    st.subheader("Export Options")
+    export_format = st.selectbox("Export Format", ["CSV", "Excel", "JSON", "Issues (CSV)"])
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
 # Main interface
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("🎯 URL Input")
+    st.subheader("URL Input")
     input_method = st.radio("Input Method", ["Single URL", "Multiple URLs", "Sitemap URL"])
     
     if input_method == "Single URL":
@@ -1142,7 +1151,7 @@ with col1:
             urls_to_crawl = parse_sitemap(sitemap_url)
 
 with col2:
-    st.subheader("📊 Quick Stats")
+    st.subheader("Quick Stats")
     if st.session_state.crawl_results:
         total_crawled = len(st.session_state.crawl_results)
         avg_speed_score = sum(r.get('speed_score', 0) for r in st.session_state.crawl_results) / total_crawled
@@ -1158,18 +1167,18 @@ with col2:
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    if st.button("🚀 Start Crawl", type="primary", disabled=st.session_state.crawl_running):
+    if st.button("Start Crawl", type="primary", disabled=st.session_state.crawl_running):
         if urls_to_crawl:
             st.session_state.crawl_running = True
             st.rerun()
 
 with col2:
-    if st.button("⏹️ Stop Crawl", disabled=not st.session_state.crawl_running):
+    if st.button("Stop Crawl", disabled=not st.session_state.crawl_running):
         st.session_state.crawl_running = False
         st.rerun()
 
 with col3:
-    if st.button("🗑️ Clear Results"):
+    if st.button("Clear Results"):
         st.session_state.crawl_results = []
         if st.session_state.driver_manager:
             st.session_state.driver_manager.cleanup()
@@ -1184,7 +1193,7 @@ with col4:
         
         if export_format == "CSV":
             csv = df.to_csv(index=False)
-            st.download_button("💾 Export Results (CSV)", csv, "crawl_results.csv", "text/csv")
+            st.download_button("Export Results (CSV)", csv, "crawl_results.csv", "text/csv")
         
         elif export_format == "Excel":
             from io import BytesIO
@@ -1192,11 +1201,11 @@ with col4:
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='Crawl Results')
             excel_data = output.getvalue()
-            st.download_button("💾 Export Results (Excel)", excel_data, "crawl_results.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("Export Results (Excel)", excel_data, "crawl_results.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         
         elif export_format == "JSON":
             json_data = df.to_json(orient='records', indent=4)
-            st.download_button("💾 Export Results (JSON)", json_data, "crawl_results.json", "application/json")
+            st.download_button("Export Results (JSON)", json_data, "crawl_results.json", "application/json")
             
         elif export_format == "Issues (CSV)":
             issues = []
@@ -1220,9 +1229,9 @@ with col4:
             if issues:
                 issues_df = pd.DataFrame(issues)
                 issues_csv = issues_df.to_csv(index=False)
-                st.download_button("💾 Export Issues (CSV)", issues_csv, "crawl_issues.csv", "text/csv")
+                st.download_button("Export Issues (CSV)", issues_csv, "crawl_issues.csv", "text/csv")
             else:
-                st.download_button("💾 Export Issues (CSV)", "No issues found.", "crawl_issues.csv", "text/csv", disabled=True)
+                st.download_button("Export Issues (CSV)", "No issues found.", "crawl_issues.csv", "text/csv", disabled=True)
 
 # Crawling logic
 if st.session_state.crawl_running and urls_to_crawl:
@@ -1238,7 +1247,7 @@ if st.session_state.crawl_running and urls_to_crawl:
     
     progress_container = st.container()
     with progress_container:
-        st.subheader("🔄 Crawling in Progress")
+        st.subheader("Crawling in Progress")
         progress_bar = st.progress(0)
         status_text = st.empty()
         
@@ -1274,23 +1283,23 @@ if st.session_state.crawl_running and urls_to_crawl:
         st.session_state.driver_manager.cleanup()
         st.session_state.driver_manager = None
     st.session_state.crawl_running = False
-    st.success("🎉 Crawling completed!")
+    st.success("Crawling completed!")
     st.rerun()
 
 # Results Display
 if st.session_state.crawl_results:
-    st.header("📊 Crawl Results & Analysis")
+    st.header("Crawl Results & Analysis")
     
     results_df = pd.DataFrame(st.session_state.crawl_results)
     
     result_tabs = st.tabs([
-        "📋 Summary", 
-        "🔍 Enhanced HTML Diff Viewer", 
-        "📈 Performance", 
-        "🕷️ JavaScript Impact", 
-        "🎯 SEO Analysis", 
-        "🔧 Technologies",
-        "⚠️ Issues Detected"
+        "Summary", 
+        "Enhanced HTML Diff Viewer", 
+        "Performance", 
+        "JavaScript Impact", 
+        "SEO Analysis", 
+        "Technologies",
+        "Issues Detected"
     ])
     
     with result_tabs[0]:  # Summary tab
@@ -1318,8 +1327,8 @@ if st.session_state.crawl_results:
             st.dataframe(display_df, use_container_width=True, height=400)
 
     with result_tabs[1]:  # Enhanced HTML Diff Viewer tab
-        st.subheader("🔍 Enhanced HTML Diff Viewer")
-        st.write("Compare original HTML with JavaScript-rendered HTML to see what changes after page load, with a focus on injections.")
+        st.subheader("Enhanced HTML Diff Viewer")
+        st.write("Compare original HTML with JavaScript-rendered HTML to see what changes after page load.")
         
         urls_with_data = [r['url'] for r in st.session_state.crawl_results if r.get('raw_html')]
         
@@ -1334,13 +1343,13 @@ if st.session_state.crawl_results:
                     
                     col1, col2 = st.columns([2,1])
                     with col1:
-                        search_term = st.text_input("🔍 Search in HTML:", placeholder="Enter search term...")
+                        search_term = st.text_input("Search in HTML:", placeholder="Enter search term...")
                     with col2:
                         show_only_changes = st.checkbox("Show only changes", False)
 
                     diff_analyzer = EnhancedHTMLDiffAnalyzer(selected_result['raw_html'], rendered_html_for_diff)
                     
-                    st.subheader("🔄 Side-by-Side HTML Comparison")
+                    st.subheader("Side-by-Side HTML Comparison")
                     if not rendered_html_for_diff:
                         st.warning("Rendered HTML is not available for this URL. Displaying raw HTML vs. empty content.")
                     
@@ -1352,12 +1361,12 @@ if st.session_state.crawl_results:
                     
                     st.markdown(diff_html, unsafe_allow_html=True)
                     
-                    st.subheader("💡 Injection & Change Summary")
+                    st.subheader("Injection & Change Summary")
                     if not any([js_injections, meta_changes, css_changes]):
                         st.info("No significant JavaScript, meta, or CSS injections were detected.")
                     else:
                         if js_injections:
-                            with st.expander(f"🟢 JavaScript Injections ({len(js_injections)})", expanded=True):
+                            with st.expander(f"JavaScript Injections ({len(js_injections)})", expanded=True):
                                 for item in js_injections:
                                     st.markdown(f"""
                                     <div class="change-item js-change">
@@ -1367,7 +1376,7 @@ if st.session_state.crawl_results:
                                     </div>
                                     """, unsafe_allow_html=True)
                         if meta_changes:
-                            with st.expander(f"🟡 Meta Tag Changes ({len(meta_changes)})"):
+                            with st.expander(f"Meta Tag Changes ({len(meta_changes)})"):
                                 for item in meta_changes:
                                     st.markdown(f"""
                                     <div class="change-item meta-change">
@@ -1377,7 +1386,7 @@ if st.session_state.crawl_results:
                                     </div>
                                     """, unsafe_allow_html=True)
                         if css_changes:
-                            with st.expander(f"🟣 CSS & Style Changes ({len(css_changes)})"):
+                            with st.expander(f"CSS & Style Changes ({len(css_changes)})"):
                                 for item in css_changes:
                                     st.markdown(f"""
                                     <div class="change-item css-change">
@@ -1397,10 +1406,10 @@ if st.session_state.crawl_results:
             col1, col2 = st.columns(2)
             with col1:
                 fig = px.histogram(results_df, x='response_time', title='Response Time Distribution', labels={'response_time': 'Response Time (s)'})
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
             with col2:
                 fig = px.scatter(results_df, x='size_bytes', y='speed_score', title='Speed Score vs. Page Size', labels={'size_bytes': 'Page Size (bytes)', 'speed_score': 'Speed Score'})
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No performance data to display.")
 
@@ -1410,14 +1419,14 @@ if st.session_state.crawl_results:
             col1, col2 = st.columns(2)
             with col1:
                 fig = px.histogram(results_df, x='js_percentage', title='JavaScript Impact Distribution', labels={'js_percentage': 'JS Impact (%)'})
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
             with col2:
                 if 'is_spa' in results_df.columns:
                     spa_counts = results_df['is_spa'].value_counts().reset_index()
                     spa_counts.columns = ['is_spa', 'count']
                     spa_counts['label'] = spa_counts['is_spa'].apply(lambda x: 'SPA' if x else 'Traditional')
                     fig = px.pie(spa_counts, values='count', names='label', title='SPA vs. Traditional Pages')
-                    st.plotly_chart(fig, width='stretch')
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info("No SPA data to display.")
         else:
@@ -1429,11 +1438,11 @@ if st.session_state.crawl_results:
             col1, col2 = st.columns(2)
             with col1:
                 fig = px.histogram(results_df, x='seo_score', title='SEO Score Distribution', labels={'seo_score': 'SEO Score'})
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
             with col2:
                 title_lengths = [len(r.get('seo_data', {}).get('title', '')) for r in st.session_state.crawl_results]
                 fig = px.histogram(x=title_lengths, title='Title Length Distribution', labels={'x': 'Title Length (chars)'})
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No SEO data to display.")
 
@@ -1444,12 +1453,12 @@ if st.session_state.crawl_results:
             tech_counts = Counter(all_technologies)
             tech_df = pd.DataFrame(tech_counts.items(), columns=['Technology', 'Count']).sort_values('Count', ascending=False)
             fig = px.bar(tech_df, x='Technology', y='Count', title='Technology Usage Across Crawled Pages')
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No technologies detected.")
 
-    with result_tabs[6]: # Issues Detected
-        st.subheader("⚠️ Issues Detected")
+    with result_tabs[6]:  # Issues Detected
+        st.subheader("Issues Detected")
         issues = []
         for r in st.session_state.crawl_results:
             url = r['url']
@@ -1478,12 +1487,12 @@ if st.session_state.crawl_results:
             styled_issues = issues_df.style.map(color_severity, subset=['Severity'])
             st.dataframe(styled_issues, use_container_width=True)
         else:
-            st.success("🎉 No major issues detected!")
+            st.success("No major issues detected!")
 
 # Footer
 st.markdown("---")
 st.markdown("""
-### 🚀 **Professional Features**
+### Professional Features
 - **Enhanced HTML Diff Viewer** with side-by-side comparison and injection highlighting.
 - **Concurrent crawling** with a stable WebDriver manager.
 - **Comprehensive SEO analysis** including titles, metas, and headings.
@@ -1494,8 +1503,16 @@ st.markdown("""
 - **Interactive visualizations** for crawl data.
 - **Export capabilities** in multiple formats.
 
-### 💡 **Pro Tips**
+### Pro Tips
 - Use the **Enhanced Diff Viewer** to pinpoint exactly what JavaScript is adding or changing on your pages.
 - Monitor the **JS Impact** and **Issues** tabs to find pages that are heavily reliant on client-side rendering.
 - **Export** your results to share with your team or for further analysis.
-""", unsafe_allow_html=True)
+""")
+
+if __name__ == "__main__":
+    # Check system status on startup
+    chrome_path = check_chrome_installation()
+    if chrome_path:
+        st.sidebar.success(f"Chrome found: {chrome_path}")
+    else:
+        st.sidebar.warning("Chrome not detected. WebDriver may not work properly.")
