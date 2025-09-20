@@ -7,7 +7,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.chrome import ChromeDriverManager, ChromeType
 from bs4 import BeautifulSoup
 import time
 import re
@@ -413,7 +413,7 @@ class WebDriverManager:
             }
             options.add_experimental_option("prefs", prefs)
 
-            service = ChromeService(ChromeDriverManager().install())
+            service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
             driver = webdriver.Chrome(service=service, options=options)
             st.success("WebDriver initialized successfully.")
             return driver
