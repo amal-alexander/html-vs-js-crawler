@@ -819,7 +819,7 @@ with st.sidebar:
     
     # Export options
     st.subheader("Export Options")
-    export_format = st.selectbox("Export Format", ["CSV", "Excel", "JSON"])
+    export_format = st.selectbox("Export Format", ["CSV", "Excel", "JSON", "Issues (CSV)"])
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -973,88 +973,83 @@ def crawl_single_url(url, driver_manager, config):
 
     raw_html = ""
     rendered_html = ""
-    raw_response = None
+    raw_response = None # To store the response from requests
+    use_selenium_for_all = False
 
-    # Step 1: Fetch Raw HTML
+    # --- Step 1: Attempt to fetch with Requests (fast path) ---
     try:
         headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            'User-Agent': USER_AGENT,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7', 'Accept-Encoding': 'gzip, deflate, br', 'Accept-Language': 'en-US,en;q=0.9', 'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"', 'Sec-Ch-Ua-Mobile': '?0', 'Sec-Ch-Ua-Platform': '"Windows"', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'none', 'Sec-Fetch-User': '?1', 'Upgrade-Insecure-Requests': '1', 'User-Agent': USER_AGENT,
         }
         
         raw_response = requests.get(url, headers=headers, timeout=config['timeout'])
         result['status_code'] = raw_response.status_code
         raw_response.raise_for_status()
-
         raw_html = raw_response.text
-        result['raw_html'] = raw_html
-        result['raw_html_size'] = len(raw_html.encode('utf-8'))
-        result['size_bytes'] = result['raw_html_size']
-        result['response_time'] = time.time() - start_time
 
     except requests.exceptions.HTTPError as e:
         result['status_code'] = e.response.status_code
-        result['errors'].append(f"Initial request failed with status {e.response.status_code}. Falling back to Selenium.")
-        
-        # Fallback to Selenium if requests is blocked (e.g., by Cloudflare)
-        if config.get('enable_js', True):
-            try:
-                driver = driver_manager.get_driver()
-                if driver:
-                    driver.get(url)
-                    raw_html = driver.page_source
-                    result['raw_html'] = raw_html
-                    result['raw_html_size'] = len(raw_html.encode('utf-8'))
-                    result['status_code'] = 200 # Assume success if Selenium gets it
-            except Exception as se:
-                result['errors'].append(f"Selenium fallback also failed: {str(se)}")
-                return result
+        result['errors'].append(f"Request failed with status {e.response.status_code}. Falling back to full Selenium mode.")
+        use_selenium_for_all = True
+    except requests.exceptions.RequestException as e:
+        result['errors'].append(f"Request failed: {str(e)}. Falling back to full Selenium mode.")
+        use_selenium_for_all = True
 
-    # Step 2: Get Rendered HTML using WebDriver
+    # --- Step 2: Fetch with Selenium (if needed or enabled) ---
     if config.get('enable_js', True):
         try:
             driver = driver_manager.get_driver()
-            
-            if driver:
-                try:
-                    driver.set_page_load_timeout(config['timeout'])
-                    driver.get(url)
-                    
-                    WebDriverWait(driver, config['timeout']).until(
-                        EC.presence_of_element_located((By.TAG_NAME, "body"))
-                    )
-                    
-                    time.sleep(config['js_wait'])
-                    
-                    rendered_html = driver.page_source
-                    result['rendered_html_size'] = len(rendered_html.encode('utf-8'))
-                    result['rendered_html'] = rendered_html
-                    
-                except Exception as e:
-                    result['errors'].append(f"Selenium error: {str(e)}")
-            
-        except Exception as e:
-            result['errors'].append(f"Selenium rendering error: {str(e)}")
-    else:
-        rendered_html = raw_html
-        result['rendered_html'] = raw_html
+            if not driver:
+                raise WebDriverException("Failed to get a WebDriver instance.")
 
-    # Step 3: Analyze HTML
+            # If requests failed, we must use Selenium for everything.
+            # If requests succeeded, we still use Selenium for the rendered view.
+            driver.set_page_load_timeout(config['timeout'])
+            driver.get(url)
+
+            # If requests failed, Selenium's initial load is our "raw" HTML
+            if use_selenium_for_all:
+                raw_html = driver.page_source
+                result['status_code'] = 200 # Assume success if Selenium loads it
+
+            # Wait for JS execution
+            WebDriverWait(driver, config['timeout']).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            time.sleep(config['js_wait'])
+            
+            # Get the final, rendered HTML
+            rendered_html = driver.page_source
+
+        except (WebDriverException, TimeoutException) as e:
+            result['errors'].append(f"Selenium processing failed: {str(e)}")
+            # If Selenium fails, we can't proceed with rendering.
+            # We might still have raw_html from requests, so we don't return yet.
+            rendered_html = raw_html # Fallback to raw_html if rendering fails
+        except Exception as e:
+            result['errors'].append(f"An unexpected error occurred during Selenium processing: {str(e)}")
+            rendered_html = raw_html
+    else:
+        # If JS is disabled, rendered is the same as raw
+        rendered_html = raw_html
+
+    # --- Step 3: Populate results and Analyze ---
+    result['raw_html'] = raw_html
+    result['rendered_html'] = rendered_html
+    result['raw_html_size'] = len(raw_html.encode('utf-8'))
+    result['rendered_html_size'] = len(rendered_html.encode('utf-8'))
+    result['size_bytes'] = result['raw_html_size'] # Base size on initial load
+
+    # If we failed to get any HTML at all, return early.
+    if not raw_html and not rendered_html:
+        result['response_time'] = time.time() - start_time
+        return result
+        
     try:
         rendered_soup = BeautifulSoup(rendered_html, 'html.parser')
         
         # Calculate JavaScript impact
-        if rendered_html:
+        if raw_html and rendered_html:
             raw_lines = raw_html.count('\n')
             rendered_lines = rendered_html.count('\n')
             result['js_additions'] = max(0, rendered_lines - raw_lines)
@@ -1176,16 +1171,48 @@ with col4:
     if st.session_state.crawl_results:
         # Prepare data for export
         df = pd.DataFrame(st.session_state.crawl_results)
+        
         if export_format == "CSV":
             csv = df.to_csv(index=False)
-            st.download_button("💾 Export CSV", csv, "crawl_results.csv", "text/csv")
+            st.download_button("💾 Export Results (CSV)", csv, "crawl_results.csv", "text/csv")
+        
         elif export_format == "Excel":
             from io import BytesIO
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='Crawl Results')
             excel_data = output.getvalue()
-            st.download_button("💾 Export Excel", excel_data, "crawl_results.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("💾 Export Results (Excel)", excel_data, "crawl_results.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        
+        elif export_format == "JSON":
+            json_data = df.to_json(orient='records', indent=4)
+            st.download_button("💾 Export Results (JSON)", json_data, "crawl_results.json", "application/json")
+            
+        elif export_format == "Issues (CSV)":
+            issues = []
+            for r in st.session_state.crawl_results:
+                url = r['url']
+                if r.get('status_code') != 200:
+                    issues.append({'URL': url, 'Issue': f"HTTP Status {r.get('status_code', 'N/A')}", 'Severity': 'High'})
+                if r.get('response_time', 0) > 3:
+                    issues.append({'URL': url, 'Issue': f"Slow response: {r.get('response_time', 0):.2f}s", 'Severity': 'Medium'})
+                
+                seo_data = r.get('seo_data', {})
+                if not seo_data.get('title'):
+                    issues.append({'URL': url, 'Issue': 'Missing title tag', 'Severity': 'High'})
+                if not seo_data.get('meta_description'):
+                    issues.append({'URL': url, 'Issue': 'Missing meta description', 'Severity': 'Medium'})
+                if seo_data.get('h1_count', 0) != 1:
+                    issues.append({'URL': url, 'Issue': f"Incorrect H1 count: {seo_data.get('h1_count', 0)}", 'Severity': 'Low'})
+                if r.get('js_percentage', 0) > 80:
+                    issues.append({'URL': url, 'Issue': f"Excessive JS modification: {r.get('js_percentage', 0):.1f}%", 'Severity': 'Medium'})
+            
+            if issues:
+                issues_df = pd.DataFrame(issues)
+                issues_csv = issues_df.to_csv(index=False)
+                st.download_button("💾 Export Issues (CSV)", issues_csv, "crawl_issues.csv", "text/csv")
+            else:
+                st.download_button("💾 Export Issues (CSV)", "No issues found.", "crawl_issues.csv", "text/csv", disabled=True)
 
 # Crawling logic
 if st.session_state.crawl_running and urls_to_crawl:
@@ -1360,10 +1387,10 @@ if st.session_state.crawl_results:
             col1, col2 = st.columns(2)
             with col1:
                 fig = px.histogram(results_df, x='response_time', title='Response Time Distribution', labels={'response_time': 'Response Time (s)'})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             with col2:
                 fig = px.scatter(results_df, x='size_bytes', y='speed_score', title='Speed Score vs. Page Size', labels={'size_bytes': 'Page Size (bytes)', 'speed_score': 'Speed Score'})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
         else:
             st.info("No performance data to display.")
 
@@ -1373,14 +1400,14 @@ if st.session_state.crawl_results:
             col1, col2 = st.columns(2)
             with col1:
                 fig = px.histogram(results_df, x='js_percentage', title='JavaScript Impact Distribution', labels={'js_percentage': 'JS Impact (%)'})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             with col2:
                 if 'is_spa' in results_df.columns:
                     spa_counts = results_df['is_spa'].value_counts().reset_index()
                     spa_counts.columns = ['is_spa', 'count']
                     spa_counts['label'] = spa_counts['is_spa'].apply(lambda x: 'SPA' if x else 'Traditional')
                     fig = px.pie(spa_counts, values='count', names='label', title='SPA vs. Traditional Pages')
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
                 else:
                     st.info("No SPA data to display.")
         else:
@@ -1392,11 +1419,11 @@ if st.session_state.crawl_results:
             col1, col2 = st.columns(2)
             with col1:
                 fig = px.histogram(results_df, x='seo_score', title='SEO Score Distribution', labels={'seo_score': 'SEO Score'})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             with col2:
                 title_lengths = [len(r.get('seo_data', {}).get('title', '')) for r in st.session_state.crawl_results]
                 fig = px.histogram(x=title_lengths, title='Title Length Distribution', labels={'x': 'Title Length (chars)'})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
         else:
             st.info("No SEO data to display.")
 
@@ -1407,7 +1434,7 @@ if st.session_state.crawl_results:
             tech_counts = Counter(all_technologies)
             tech_df = pd.DataFrame(tech_counts.items(), columns=['Technology', 'Count']).sort_values('Count', ascending=False)
             fig = px.bar(tech_df, x='Technology', y='Count', title='Technology Usage Across Crawled Pages')
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("No technologies detected.")
 
