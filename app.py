@@ -413,14 +413,23 @@ class WebDriverManager:
             }
             options.add_experimental_option("prefs", prefs)
 
-            service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
-            driver = webdriver.Chrome(service=service, options=options)
-            st.success("WebDriver initialized successfully.")
-            return driver
+            try:
+                # Use system-installed chromedriver on Streamlit Cloud
+                service = ChromeService(executable_path="/usr/bin/chromedriver")
+                driver = webdriver.Chrome(service=service, options=options)
+                st.success("WebDriver initialized successfully using system driver.")
+                return driver
+            except (FileNotFoundError, WebDriverException):
+                # Fallback to webdriver-manager for local development
+                st.warning("System chromedriver not found. Falling back to webdriver-manager.")
+                service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
+                driver = webdriver.Chrome(service=service, options=options)
+                st.success("WebDriver initialized successfully using webdriver-manager.")
+                return driver
+
         except Exception as e:
             st.error(f"Fatal Error: Failed to create WebDriver. The service may not be able to run. Error: {e}")
             st.stop()
-            return None
 
     def cleanup(self):
         with self._lock:
