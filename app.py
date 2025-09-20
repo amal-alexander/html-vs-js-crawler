@@ -413,19 +413,19 @@ class WebDriverManager:
             }
             options.add_experimental_option("prefs", prefs)
 
-            try:
-                # Use system-installed chromedriver on Streamlit Cloud
-                service = ChromeService(executable_path="/usr/bin/chromedriver")
-                driver = webdriver.Chrome(service=service, options=options)
-                st.success("WebDriver initialized successfully using system driver.")
-                return driver
-            except (FileNotFoundError, WebDriverException):
-                # Fallback to webdriver-manager for local development
-                st.warning("System chromedriver not found. Falling back to webdriver-manager.")
+            # In a containerized environment like Streamlit Cloud, it's more reliable
+            # to use the pre-installed driver.
+            if os.path.exists("/usr/bin/chromedriver"):
+                 st.info("System chromedriver found. Using system driver.")
+                 service = ChromeService(executable_path="/usr/bin/chromedriver")
+            else:
+                # Fallback to webdriver-manager for local development or other environments.
+                st.info("System chromedriver not found. Using webdriver-manager to download driver.")
                 service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
-                driver = webdriver.Chrome(service=service, options=options)
-                st.success("WebDriver initialized successfully using webdriver-manager.")
-                return driver
+
+            driver = webdriver.Chrome(service=service, options=options)
+            st.success("WebDriver initialized successfully.")
+            return driver
 
         except Exception as e:
             st.error(f"Fatal Error: Failed to create WebDriver. The service may not be able to run. Error: {e}")
