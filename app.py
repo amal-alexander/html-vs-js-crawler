@@ -413,14 +413,15 @@ class WebDriverManager:
             }
             options.add_experimental_option("prefs", prefs)
 
-            # For Streamlit Cloud, use the system-installed driver.
-            # The path `/usr/bin/chromedriver` is standard in these environments.
-            if os.path.exists("/usr/bin/chromedriver"):
-                st.info("System chromedriver found. Using system driver.")
-                service = ChromeService(executable_path="/usr/bin/chromedriver")
+            # For Streamlit Cloud, Chrome is installed by setup.sh
+            if os.path.exists("/usr/bin/google-chrome-stable"):
+                st.info("Chrome binary found. Using system-installed Chrome.")
+                options.binary_location = "/usr/bin/google-chrome-stable"
+                # webdriver-manager will find the corresponding chromedriver
+                service = ChromeService(ChromeDriverManager().install())
             else:
                 # For local development, fall back to webdriver-manager.
-                st.info("System chromedriver not found. Using webdriver-manager to download driver.")
+                st.info("System Chrome not found. Using webdriver-manager to download Chromium.")
                 service = ChromeService(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
 
             driver = webdriver.Chrome(service=service, options=options)
